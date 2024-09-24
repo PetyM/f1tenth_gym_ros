@@ -61,7 +61,6 @@ class GymBridge(Node):
         self.declare_parameter('map_path', '/home/michal/Documents/f1tenth_gym_ros/f1tenth_gym_ros/maps/Spielberg_map')
         self.declare_parameter('map_img_ext', '.png')
         
-        self.declare_parameter('kb_teleop', True)
 
         # env backend
         self.env: gym.Env = gym.make('f1tenth-v0',
@@ -96,6 +95,7 @@ class GymBridge(Node):
         self.opp_collision: bool = False
 
         self.obs, self.info = self.env.reset(options={'poses' : np.array([[sx, sy, stheta], [sx1, sy1, stheta1]])})
+        self._update_sim_state()
 
         # sim physical step timer
         self.drive_timer: rclpy.timer.Timer = self.create_timer(0.01, self.drive_timer_callback)
@@ -114,9 +114,6 @@ class GymBridge(Node):
 
         self.opp_drive_sub: rclpy.subscription.Subscription = self.create_subscription(AckermannDriveStamped, f'{self.opp_namespace}/{drive_topic}', self.opp_drive_callback, 10)
         self.opp_reset_sub: rclpy.subscription.Subscription = self.create_subscription(PoseStamped, '/goal_pose', self.opp_reset_callback, 10)
-
-        if self.get_parameter('kb_teleop').value:
-            self.teleop_sub: rclpy.subscription.Subscription = self.create_subscription(Twist, '/cmd_vel', self.teleop_callback, 10)
 
 
     def drive_callback(self, drive_msg: AckermannDriveStamped):
@@ -153,20 +150,6 @@ class GymBridge(Node):
         rqw = pose_msg.pose.pose.orientation.w
         _, _, rtheta = euler.quat2euler([rqw, rqx, rqy, rqz], axes='sxyz')
         self.obs, _ , self.done, _ = self.env.reset(np.array([list(self.ego_pose), [rx, ry, rtheta]]))
-
-
-    def teleop_callback(self, twist_msg: Twist):
-        if not self.ego_drive_published:
-            self.ego_drive_published = True
-
-        self.ego_requested_speed = twist_msg.linear.x
-
-        if twist_msg.angular.z > 0.0:
-            self.ego_steer = 0.3
-        elif twist_msg.angular.z < 0.0:
-            self.ego_steer = -0.3
-        else:
-            self.ego_steer = 0.0
 
 
     def drive_timer_callback(self):
