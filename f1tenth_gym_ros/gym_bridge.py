@@ -164,13 +164,13 @@ class GymBridge(Node):
         self._publish_states()
 
     def _update_sim_state(self):
-        self.opp_pose[0] = self.obs['agent_0']['pose_x']
-        self.opp_pose[1] = self.obs['agent_0']['pose_y']
-        self.opp_pose[2] = self.obs['agent_0']['pose_theta']
+        self.opp_pose[0] = self.obs['agent_1']['pose_x']
+        self.opp_pose[1] = self.obs['agent_1']['pose_y']
+        self.opp_pose[2] = self.obs['agent_1']['pose_theta']
 
-        self.ego_pose[0] = self.obs['agent_1']['pose_x']
-        self.ego_pose[1] = self.obs['agent_1']['pose_y']
-        self.ego_pose[2] = self.obs['agent_1']['pose_theta']
+        self.ego_pose[0] = self.obs['agent_0']['pose_x']
+        self.ego_pose[1] = self.obs['agent_0']['pose_y']
+        self.ego_pose[2] = self.obs['agent_0']['pose_theta']
 
     def _publish_transforms(self, ts):
         ego_t = Transform()
