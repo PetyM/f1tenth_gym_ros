@@ -237,7 +237,7 @@ Visualization Manager:
       Name: Current View
       Near Clip Distance: 0.009999999776482582
       Pitch: 0.445398211479187
-      Target Frame: <Fixed Frame>
+      Target Frame: ego_racecar/base_link
       Value: Orbit (rviz)
       Yaw: 3.385427474975586
     Saved: ~
