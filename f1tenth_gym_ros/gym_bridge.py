@@ -120,15 +120,18 @@ class GymBridge(Node):
         self.ego_requested_speed = drive_msg.drive.speed
         self.ego_steer = drive_msg.drive.steering_angle
         self.ego_drive_published = True
+        self.get_logger().info(f'(drive_callback) received ego drive control: v={self.ego_requested_speed:.2f}, d={self.ego_steer:.2f}')
 
 
     def opp_drive_callback(self, drive_msg: AckermannDriveStamped):
         self.opp_requested_speed = drive_msg.drive.speed
         self.opp_steer = drive_msg.drive.steering_angle
         self.opp_drive_published = True
+        self.get_logger().info(f'(opp_drive_callback) received opponent drive control: v={self.opp_requested_speed:.2f}, d={self.opp_steer:.2f}')
 
 
     def ego_reset_callback(self, pose_msg: PoseWithCovarianceStamped):
+        self.get_logger().info(f'(ego_reset_callback)')
         rx = pose_msg.pose.pose.position.x
         ry = pose_msg.pose.pose.position.y
         rqx = pose_msg.pose.pose.orientation.x
@@ -142,6 +145,7 @@ class GymBridge(Node):
 
 
     def opp_reset_callback(self, pose_msg: PoseWithCovarianceStamped):
+        self.get_logger().info(f'(opp_reset_callback)')
         rx = pose_msg.pose.pose.position.x
         ry = pose_msg.pose.pose.position.y
         rqx = pose_msg.pose.pose.orientation.x
