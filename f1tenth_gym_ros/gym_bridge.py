@@ -53,23 +53,28 @@ class GymBridge(Node):
         self.declare_parameter('sy', 0.0)
         self.declare_parameter('stheta', 0.0)
     
+        self.declare_parameter('simulate_opponent', False)
         self.declare_parameter('opp_namespace', 'opp_racecar')
         self.declare_parameter('sx1', 2.0)
         self.declare_parameter('sy1', 0.5)
         self.declare_parameter('stheta1', 0.0)
 
-        self.declare_parameter('map_path', '/home/michal/Documents/f1tenth_gym_ros/f1tenth_gym_ros/maps/Spielberg_map')
+        self.declare_parameter('map_path', 'f1tenth_gym_ros/maps/Spielberg_map')
         self.declare_parameter('map_img_ext', '.png')
         
 
+        self.simulate_opponent: bool = self.get_parameter('simulate_opponent').value
+
+        self.get_logger().error(self.get_parameter('map_path').value)
+
         # env backend
         self.env: gym.Env = gym.make('f1tenth-v0',
-                            map=self.get_parameter('map_path').value,
-                            map_ext=self.get_parameter('map_img_ext').value,
-                            num_agents=2,
                             config={
+                                    # "map": self.get_parameter('map_path').value,
+                                    # "map_ext": self.get_parameter('map_img_ext').value,
                                     "control_input": ["speed", "steering_angle"],
                                     "observation_config": {"type": "dynamic_state"},
+                                    "num_agents": 2 if self.simulate_opponent else 1
                                     },)
         
         drive_topic: str = self.get_parameter('drive_topic').value
@@ -85,16 +90,19 @@ class GymBridge(Node):
         self.ego_collision: bool = False
         self.ego_drive_published: bool = False
 
-        self.opp_namespace: str = self.get_parameter('opp_namespace').value
-        sx1: float = self.get_parameter('sx1').value
-        sy1: float = self.get_parameter('sy1').value
-        stheta1: float = self.get_parameter('stheta1').value
-        self.opp_pose: list[float] = [sx1, sy1, stheta1]
-        self.opp_requested_speed: float = 0.0
-        self.opp_steer: float = 0.0
-        self.opp_collision: bool = False
+        if self.simulate_opponent:
+            self.opp_namespace: str = self.get_parameter('opp_namespace').value
+            sx1: float = self.get_parameter('sx1').value
+            sy1: float = self.get_parameter('sy1').value
+            stheta1: float = self.get_parameter('stheta1').value
+            self.opp_pose: list[float] = [sx1, sy1, stheta1]
+            self.opp_requested_speed: float = 0.0
+            self.opp_steer: float = 0.0
+            self.opp_collision: bool = False
 
-        self.obs, self.info = self.env.reset(options={'poses' : np.array([[sx, sy, stheta], [sx1, sy1, stheta1]])})
+            self.obs, self.info = self.env.reset(options={'poses' : np.array([[sx, sy, stheta], [sx1, sy1, stheta1]])})
+        else:
+            self.obs, self.info = self.env.reset(options={'poses' : np.array([sx, sy, stheta]).reshape(1, 3)})
         self._update_sim_state()
 
         # sim physical step timer
@@ -106,14 +114,13 @@ class GymBridge(Node):
         self.br: TransformBroadcaster = TransformBroadcaster(self)
 
         self.ego_state_publisher: rclpy.publisher.Publisher = self.create_publisher(Float64MultiArray, f'{self.ego_namespace}/{state_topic}', 10)
-        self.opp_state_publisher: rclpy.publisher.Publisher = self.create_publisher(Float64MultiArray, f'{self.opp_namespace}/{state_topic}', 10)
-
-        # subscribers
         self.ego_drive_sub: rclpy.subscription.Subscription = self.create_subscription(AckermannDriveStamped, f'{self.ego_namespace}/{drive_topic}', self.drive_callback, 10)
         self.ego_reset_sub: rclpy.subscription.Subscription = self.create_subscription(PoseWithCovarianceStamped, '/initialpose', self.ego_reset_callback, 10)
 
-        self.opp_drive_sub: rclpy.subscription.Subscription = self.create_subscription(AckermannDriveStamped, f'{self.opp_namespace}/{drive_topic}', self.opp_drive_callback, 10)
-        self.opp_reset_sub: rclpy.subscription.Subscription = self.create_subscription(PoseStamped, '/goal_pose', self.opp_reset_callback, 10)
+        if self.simulate_opponent:
+            self.opp_state_publisher: rclpy.publisher.Publisher = self.create_publisher(Float64MultiArray, f'{self.opp_namespace}/{state_topic}', 10)
+            self.opp_drive_sub: rclpy.subscription.Subscription = self.create_subscription(AckermannDriveStamped, f'{self.opp_namespace}/{drive_topic}', self.opp_drive_callback, 10)
+            self.opp_reset_sub: rclpy.subscription.Subscription = self.create_subscription(PoseStamped, '/goal_pose', self.opp_reset_callback, 10)
 
 
     def drive_callback(self, drive_msg: AckermannDriveStamped):
@@ -157,7 +164,10 @@ class GymBridge(Node):
 
 
     def drive_timer_callback(self):
-        self.obs, _, self.done, _, _ = self.env.step(np.array([[self.ego_steer, self.ego_requested_speed], [self.opp_steer, self.opp_requested_speed]]))
+        if self.simulate_opponent:
+            self.obs, _, self.done, _, _ = self.env.step(np.array([[self.ego_steer, self.ego_requested_speed], [self.opp_steer, self.opp_requested_speed]]))
+        else:
+            self.obs, _, self.done, _, _ = self.env.step(np.array([self.ego_steer, self.ego_requested_speed]).reshape(1, 2))
         self._update_sim_state()
 
 
@@ -167,14 +177,17 @@ class GymBridge(Node):
         self._publish_wheel_transforms(ts)
         self._publish_states()
 
-    def _update_sim_state(self):
-        self.opp_pose[0] = self.obs['agent_1']['pose_x']
-        self.opp_pose[1] = self.obs['agent_1']['pose_y']
-        self.opp_pose[2] = self.obs['agent_1']['pose_theta']
 
+    def _update_sim_state(self):
         self.ego_pose[0] = self.obs['agent_0']['pose_x']
         self.ego_pose[1] = self.obs['agent_0']['pose_y']
         self.ego_pose[2] = self.obs['agent_0']['pose_theta']
+
+        if self.simulate_opponent:
+            self.opp_pose[0] = self.obs['agent_1']['pose_x']
+            self.opp_pose[1] = self.obs['agent_1']['pose_y']
+            self.opp_pose[2] = self.obs['agent_1']['pose_theta']
+
 
     def _publish_transforms(self, ts):
         ego_t = Transform()
@@ -194,22 +207,24 @@ class GymBridge(Node):
         ego_ts.child_frame_id = self.ego_namespace + '/base_link'
         self.br.sendTransform(ego_ts)
 
-        opp_t = Transform()
-        opp_t.translation.x = float(self.opp_pose[0])
-        opp_t.translation.y = float(self.opp_pose[1])
-        opp_t.translation.z = float(0.0)
-        opp_quat = euler.euler2quat(0.0, 0.0, self.opp_pose[2], axes='sxyz')
-        opp_t.rotation.x = float(opp_quat[1])
-        opp_t.rotation.y = float(opp_quat[2])
-        opp_t.rotation.z = float(opp_quat[3])
-        opp_t.rotation.w = float(opp_quat[0])
+        if self.simulate_opponent:
+            opp_t = Transform()
+            opp_t.translation.x = float(self.opp_pose[0])
+            opp_t.translation.y = float(self.opp_pose[1])
+            opp_t.translation.z = float(0.0)
+            opp_quat = euler.euler2quat(0.0, 0.0, self.opp_pose[2], axes='sxyz')
+            opp_t.rotation.x = float(opp_quat[1])
+            opp_t.rotation.y = float(opp_quat[2])
+            opp_t.rotation.z = float(opp_quat[3])
+            opp_t.rotation.w = float(opp_quat[0])
 
-        opp_ts = TransformStamped()
-        opp_ts.transform = opp_t
-        opp_ts.header.stamp = ts
-        opp_ts.header.frame_id = 'map'
-        opp_ts.child_frame_id = self.opp_namespace + '/base_link'
-        self.br.sendTransform(opp_ts)
+            opp_ts = TransformStamped()
+            opp_ts.transform = opp_t
+            opp_ts.header.stamp = ts
+            opp_ts.header.frame_id = 'map'
+            opp_ts.child_frame_id = self.opp_namespace + '/base_link'
+            self.br.sendTransform(opp_ts)
+
 
     def _publish_wheel_transforms(self, ts):
         ego_wheel_ts = TransformStamped()
@@ -226,19 +241,21 @@ class GymBridge(Node):
         ego_wheel_ts.child_frame_id = self.ego_namespace + '/front_right_wheel'
         self.br.sendTransform(ego_wheel_ts)
 
-        opp_wheel_ts = TransformStamped()
-        opp_wheel_quat = euler.euler2quat(0., 0., self.opp_steer, axes='sxyz')
-        opp_wheel_ts.transform.rotation.x = float(opp_wheel_quat[1])
-        opp_wheel_ts.transform.rotation.y = float(opp_wheel_quat[2])
-        opp_wheel_ts.transform.rotation.z = float(opp_wheel_quat[3])
-        opp_wheel_ts.transform.rotation.w = float(opp_wheel_quat[0])
-        opp_wheel_ts.header.stamp = ts
-        opp_wheel_ts.header.frame_id = self.opp_namespace + '/front_left_hinge'
-        opp_wheel_ts.child_frame_id = self.opp_namespace + '/front_left_wheel'
-        self.br.sendTransform(opp_wheel_ts)
-        opp_wheel_ts.header.frame_id = self.opp_namespace + '/front_right_hinge'
-        opp_wheel_ts.child_frame_id = self.opp_namespace + '/front_right_wheel'
-        self.br.sendTransform(opp_wheel_ts)
+        if self.simulate_opponent:
+            opp_wheel_ts = TransformStamped()
+            opp_wheel_quat = euler.euler2quat(0., 0., self.opp_steer, axes='sxyz')
+            opp_wheel_ts.transform.rotation.x = float(opp_wheel_quat[1])
+            opp_wheel_ts.transform.rotation.y = float(opp_wheel_quat[2])
+            opp_wheel_ts.transform.rotation.z = float(opp_wheel_quat[3])
+            opp_wheel_ts.transform.rotation.w = float(opp_wheel_quat[0])
+            opp_wheel_ts.header.stamp = ts
+            opp_wheel_ts.header.frame_id = self.opp_namespace + '/front_left_hinge'
+            opp_wheel_ts.child_frame_id = self.opp_namespace + '/front_left_wheel'
+            self.br.sendTransform(opp_wheel_ts)
+            opp_wheel_ts.header.frame_id = self.opp_namespace + '/front_right_hinge'
+            opp_wheel_ts.child_frame_id = self.opp_namespace + '/front_right_wheel'
+            self.br.sendTransform(opp_wheel_ts)
+
 
     def _publish_states(self):
         ego = Float64MultiArray()
@@ -251,15 +268,17 @@ class GymBridge(Node):
                     self.obs['agent_0']['beta']]
         self.ego_state_publisher.publish(ego)
 
-        opp = Float64MultiArray()
-        opp.data = [self.obs['agent_1']['pose_x'],
-                    self.obs['agent_1']['pose_y'],
-                    self.obs['agent_1']['delta'],
-                    self.obs['agent_1']['linear_vel_x'],
-                    self.obs['agent_1']['pose_theta'],
-                    self.obs['agent_1']['ang_vel_z'],
-                    self.obs['agent_1']['beta']]
-        self.opp_state_publisher.publish(opp)
+        if self.simulate_opponent:
+            opp = Float64MultiArray()
+            opp.data = [self.obs['agent_1']['pose_x'],
+                        self.obs['agent_1']['pose_y'],
+                        self.obs['agent_1']['delta'],
+                        self.obs['agent_1']['linear_vel_x'],
+                        self.obs['agent_1']['pose_theta'],
+                        self.obs['agent_1']['ang_vel_z'],
+                        self.obs['agent_1']['beta']]
+            self.opp_state_publisher.publish(opp)
+
 
 def main(args=None):
     rclpy.init(args=args)
