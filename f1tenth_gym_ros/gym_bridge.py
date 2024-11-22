@@ -122,6 +122,10 @@ class GymBridge(Node):
             self.opp_drive_sub: rclpy.subscription.Subscription = self.create_subscription(AckermannDriveStamped, f'{self.opp_namespace}/{drive_topic}', self.opp_drive_callback, 10)
             self.opp_reset_sub: rclpy.subscription.Subscription = self.create_subscription(PoseStamped, '/goal_pose', self.opp_reset_callback, 10)
 
+        self.wait_for_node('ego_agent', -1)
+        if self.simulate_opponent:
+            self.wait_for_node('opp_agent', -1)
+
 
     def drive_callback(self, drive_msg: AckermannDriveStamped):
         self.ego_requested_speed = drive_msg.drive.speed
