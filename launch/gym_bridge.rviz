@@ -28,7 +28,7 @@ Visualization Manager:
       Binary representation: false
       Binary threshold: 100
       Class: rviz_default_plugins/Map
-      Color Scheme: costmap
+      Color Scheme: raw
       Draw Behind: false
       Enabled: true
       Name: Map
@@ -38,13 +38,13 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /costmap
+        Value: /ego_racecar/costmap
       Update Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /costmap_updates
+        Value: /ego_racecar/costmap_updates
       Use Timestamp: false
       Value: true
     - Alpha: 1
@@ -126,7 +126,7 @@ Visualization Manager:
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 24
+      Max Intensity: 14
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: Ego Predictions
@@ -162,44 +162,6 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
-        opp_racecar/back_left_wheel:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        opp_racecar/back_right_wheel:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        opp_racecar/base_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        opp_racecar/front_left_hinge:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        opp_racecar/front_left_wheel:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        opp_racecar/front_right_hinge:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        opp_racecar/front_right_wheel:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        opp_racecar/laser_model:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
       Mass Properties:
         Inertia: false
         Mass: false
