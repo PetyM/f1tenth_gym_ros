@@ -27,13 +27,10 @@ from rclpy.node import Node
 import rclpy.publisher
 import rclpy.subscription
 import rclpy.timer
-from geometry_msgs.msg import PoseStamped
-from geometry_msgs.msg import PoseWithCovarianceStamped
-from geometry_msgs.msg import Twist
-from geometry_msgs.msg import TransformStamped
-from geometry_msgs.msg import Transform
-from geometry_msgs.msg import Quaternion
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist, TransformStamped, Transform, Quaternion, Pose, Point, Vector3
 from ackermann_msgs.msg import AckermannDriveStamped
+from nav_msgs.msg import Odometry
+
 from tf2_ros import TransformBroadcaster
 from std_msgs.msg import Float64MultiArray
 
@@ -115,12 +112,11 @@ class GymBridge(Node):
 
         self.ego_state_publisher: rclpy.publisher.Publisher = self.create_publisher(Float64MultiArray, f'{self.ego_namespace}/{state_topic}', 10)
         self.ego_drive_sub: rclpy.subscription.Subscription = self.create_subscription(AckermannDriveStamped, f'{self.ego_namespace}/{drive_topic}', self.drive_callback, 10)
-        self.ego_reset_sub: rclpy.subscription.Subscription = self.create_subscription(PoseWithCovarianceStamped, '/initialpose', self.ego_reset_callback, 10)
+        self.odometry_publisher: rclpy.publisher.Publisher = self.create_publisher(Odometry, '/odom', 1)
 
         if self.simulate_opponent:
             self.opp_state_publisher: rclpy.publisher.Publisher = self.create_publisher(Float64MultiArray, f'{self.opp_namespace}/{state_topic}', 10)
             self.opp_drive_sub: rclpy.subscription.Subscription = self.create_subscription(AckermannDriveStamped, f'{self.opp_namespace}/{drive_topic}', self.opp_drive_callback, 10)
-            self.opp_reset_sub: rclpy.subscription.Subscription = self.create_subscription(PoseStamped, '/goal_pose', self.opp_reset_callback, 10)
 
         self.wait_for_node('ego_agent', -1)
         if self.simulate_opponent:
@@ -141,32 +137,6 @@ class GymBridge(Node):
         self.get_logger().info(f'(opp_drive_callback) received opponent drive control: v={self.opp_requested_speed:.2f}, d={self.opp_steer:.2f}')
 
 
-    def ego_reset_callback(self, pose_msg: PoseWithCovarianceStamped):
-        self.get_logger().info(f'(ego_reset_callback)')
-        rx = pose_msg.pose.pose.position.x
-        ry = pose_msg.pose.pose.position.y
-        rqx = pose_msg.pose.pose.orientation.x
-        rqy = pose_msg.pose.pose.orientation.y
-        rqz = pose_msg.pose.pose.orientation.z
-        rqw = pose_msg.pose.pose.orientation.w
-        _, _, rtheta = euler.quat2euler([rqw, rqx, rqy, rqz], axes='sxyz')
-
-        opp_pose = [self.obs['poses_x'][1], self.obs['poses_y'][1], self.obs['poses_theta'][1]]
-        self.obs, _ , self.done, _ = self.env.reset(np.array([[rx, ry, rtheta], opp_pose]))
-
-
-    def opp_reset_callback(self, pose_msg: PoseWithCovarianceStamped):
-        self.get_logger().info(f'(opp_reset_callback)')
-        rx = pose_msg.pose.pose.position.x
-        ry = pose_msg.pose.pose.position.y
-        rqx = pose_msg.pose.pose.orientation.x
-        rqy = pose_msg.pose.pose.orientation.y
-        rqz = pose_msg.pose.pose.orientation.z
-        rqw = pose_msg.pose.pose.orientation.w
-        _, _, rtheta = euler.quat2euler([rqw, rqx, rqy, rqz], axes='sxyz')
-        self.obs, _ , self.done, _ = self.env.reset(np.array([list(self.ego_pose), [rx, ry, rtheta]]))
-
-
     def drive_timer_callback(self):
         if self.simulate_opponent:
             self.obs, _, self.done, _, _ = self.env.step(np.array([[self.ego_steer, self.ego_requested_speed], [self.opp_steer, self.opp_requested_speed]]))
@@ -180,6 +150,7 @@ class GymBridge(Node):
         self._publish_transforms(ts)
         self._publish_wheel_transforms(ts)
         self._publish_states()
+        self._publish_odometry(ts)
 
 
     def _update_sim_state(self):
@@ -209,6 +180,9 @@ class GymBridge(Node):
         ego_ts.header.stamp = ts
         ego_ts.header.frame_id = 'map'
         ego_ts.child_frame_id = self.ego_namespace + '/base_link'
+        self.br.sendTransform(ego_ts)
+
+        ego_ts.child_frame_id = 'base_link'
         self.br.sendTransform(ego_ts)
 
         if self.simulate_opponent:
@@ -283,6 +257,31 @@ class GymBridge(Node):
                         self.obs['agent_1']['beta']]
             self.opp_state_publisher.publish(opp)
 
+    def _publish_odometry(self, ts):
+        msg = Odometry()
+        msg.header.stamp = ts
+        msg.header.frame_id = 'map'
+
+        quat = euler.euler2quat(0.0, 0.0, self.ego_pose[2], axes='sxyz')
+
+        msg.pose.pose.position = Point(x = float(self.ego_pose[0]),
+                                       y = float(self.ego_pose[1]),
+                                       z = float(0.0))
+        msg.pose.pose.orientation = Quaternion(x = float(quat[1]),
+                                               y = float(quat[2]),
+                                               z = float(quat[3]),
+                                               w = float(quat[0]))
+        msg.pose.covariance = np.zeros(6, dtype=float).tolist()
+
+        msg.twist.twist.linear = Vector3(x = float(self.obs['agent_0']['linear_vel_x']),
+                                         y = float(0.0),
+                                         z = float(0.0))
+        msg.twist.twist.angular = Vector3(x = float(0.0),
+                                          y = float(0.0),
+                                          z = float(self.obs['agent_0']['ang_vel_z']))
+        msg.twist.covariance = np.zeros(6, dtype=float).tolist()
+
+        self.odometry_publisher.publish(msg)
 
 def main(args=None):
     rclpy.init(args=args)
