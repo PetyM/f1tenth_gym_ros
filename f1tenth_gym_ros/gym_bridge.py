@@ -32,7 +32,7 @@ from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
 
 from tf2_ros import TransformBroadcaster
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, Float32 
 
 import f1tenth_gym
 import gymnasium as gym
@@ -113,6 +113,9 @@ class GymBridge(Node):
         self.ego_state_publisher: rclpy.publisher.Publisher = self.create_publisher(Float64MultiArray, f'{self.ego_namespace}/{state_topic}', 10)
         self.ego_drive_sub: rclpy.subscription.Subscription = self.create_subscription(AckermannDriveStamped, f'{self.ego_namespace}/{drive_topic}', self.drive_callback, 10)
         self.odometry_publisher: rclpy.publisher.Publisher = self.create_publisher(Odometry, '/odom', 1)
+        self.speed_publisher: rclpy.publisher.Publisher = self.create_publisher(Float32, f'{self.ego_namespace}/speed', 1)
+        self.acceleration_publisher: rclpy.publisher.Publisher = self.create_publisher(Float32, f'{self.ego_namespace}/acceleration', 1)
+        self.steering_publisher: rclpy.publisher.Publisher = self.create_publisher(Float32, f'{self.ego_namespace}/steer', 1)
 
         if self.simulate_opponent:
             self.opp_state_publisher: rclpy.publisher.Publisher = self.create_publisher(Float64MultiArray, f'{self.opp_namespace}/{state_topic}', 10)
@@ -151,6 +154,7 @@ class GymBridge(Node):
         self._publish_wheel_transforms(ts)
         self._publish_states()
         self._publish_odometry(ts)
+        self._publish_overlay_data()
 
 
     def _update_sim_state(self):
@@ -282,6 +286,13 @@ class GymBridge(Node):
         msg.twist.covariance = np.zeros(6, dtype=float).tolist()
 
         self.odometry_publisher.publish(msg)
+    
+
+    def _publish_overlay_data(self):
+        self.speed_publisher.publish(Float32(data=float(self.obs['agent_0']['linear_vel_x'])))
+        self.acceleration_publisher.publish(Float32(data=float(self.ego_requested_acceleration)))
+        self.steering_publisher.publish(Float32(data=float(self.obs['agent_0']['ang_vel_z'])))
+
 
 def main(args=None):
     rclpy.init(args=args)
