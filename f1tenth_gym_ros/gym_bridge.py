@@ -69,7 +69,7 @@ class GymBridge(Node):
                             config={
                                     # "map": self.get_parameter('map_path').value,
                                     # "map_ext": self.get_parameter('map_img_ext').value,
-                                    "control_input": ["speed", "steering_angle"],
+                                    "control_input": ["accl", "steering_speed"],
                                     "observation_config": {"type": "dynamic_state"},
                                     "num_agents": 2 if self.simulate_opponent else 1
                                     },)
@@ -82,8 +82,8 @@ class GymBridge(Node):
         sy: float = self.get_parameter('sy').value
         stheta: float = self.get_parameter('stheta').value
         self.ego_pose: list[float] = [sx, sy, stheta]
-        self.ego_requested_speed: float = 0.0
-        self.ego_steer: float = 0.0
+        self.ego_requested_acceleration: float = 0.0
+        self.ego_steer_speed: float = 0.0
         self.ego_collision: bool = False
         self.ego_drive_published: bool = False
 
@@ -93,8 +93,8 @@ class GymBridge(Node):
             sy1: float = self.get_parameter('sy1').value
             stheta1: float = self.get_parameter('stheta1').value
             self.opp_pose: list[float] = [sx1, sy1, stheta1]
-            self.opp_requested_speed: float = 0.0
-            self.opp_steer: float = 0.0
+            self.opp_requested_acceleration: float = 0.0
+            self.opp_steer_speed: float = 0.0
             self.opp_collision: bool = False
 
             self.obs, self.info = self.env.reset(options={'poses' : np.array([[sx, sy, stheta], [sx1, sy1, stheta1]])})
@@ -124,24 +124,24 @@ class GymBridge(Node):
 
 
     def drive_callback(self, drive_msg: AckermannDriveStamped):
-        self.ego_requested_speed = drive_msg.drive.speed
-        self.ego_steer = drive_msg.drive.steering_angle
+        self.ego_requested_acceleration = drive_msg.drive.acceleration
+        self.ego_steer_speed = drive_msg.drive.steering_angle_velocity
         self.ego_drive_published = True
-        self.get_logger().info(f'(drive_callback) received ego drive control: v={self.ego_requested_speed:.2f}, d={self.ego_steer:.2f}')
+        self.get_logger().info(f'(drive_callback) received ego drive control: v={self.ego_requested_acceleration:.2f}, d={self.ego_steer_speed:.2f}')
 
 
     def opp_drive_callback(self, drive_msg: AckermannDriveStamped):
-        self.opp_requested_speed = drive_msg.drive.speed
-        self.opp_steer = drive_msg.drive.steering_angle
+        self.opp_requested_acceleration = drive_msg.drive.acceleration
+        self.opp_steer_speed = drive_msg.drive.steering_angle_velocity
         self.opp_drive_published = True
-        self.get_logger().info(f'(opp_drive_callback) received opponent drive control: v={self.opp_requested_speed:.2f}, d={self.opp_steer:.2f}')
+        self.get_logger().info(f'(opp_drive_callback) received opponent drive control: v={self.opp_requested_acceleration:.2f}, d={self.opp_steer_speed:.2f}')
 
 
     def drive_timer_callback(self):
         if self.simulate_opponent:
-            self.obs, _, self.done, _, _ = self.env.step(np.array([[self.ego_steer, self.ego_requested_speed], [self.opp_steer, self.opp_requested_speed]]))
+            self.obs, _, self.done, _, _ = self.env.step(np.array([[self.ego_steer_speed, self.ego_requested_acceleration], [self.opp_steer_speed, self.opp_requested_acceleration]]))
         else:
-            self.obs, _, self.done, _, _ = self.env.step(np.array([self.ego_steer, self.ego_requested_speed]).reshape(1, 2))
+            self.obs, _, self.done, _, _ = self.env.step(np.array([self.ego_steer_speed, self.ego_requested_acceleration]).reshape(1, 2))
         self._update_sim_state()
 
 
@@ -206,7 +206,7 @@ class GymBridge(Node):
 
     def _publish_wheel_transforms(self, ts):
         ego_wheel_ts = TransformStamped()
-        ego_wheel_quat = euler.euler2quat(0., 0., self.ego_steer, axes='sxyz')
+        ego_wheel_quat = euler.euler2quat(0., 0., self.ego_steer_speed, axes='sxyz')
         ego_wheel_ts.transform.rotation.x = float(ego_wheel_quat[1])
         ego_wheel_ts.transform.rotation.y = float(ego_wheel_quat[2])
         ego_wheel_ts.transform.rotation.z = float(ego_wheel_quat[3])
@@ -221,7 +221,7 @@ class GymBridge(Node):
 
         if self.simulate_opponent:
             opp_wheel_ts = TransformStamped()
-            opp_wheel_quat = euler.euler2quat(0., 0., self.opp_steer, axes='sxyz')
+            opp_wheel_quat = euler.euler2quat(0., 0., self.opp_steer_speed, axes='sxyz')
             opp_wheel_ts.transform.rotation.x = float(opp_wheel_quat[1])
             opp_wheel_ts.transform.rotation.y = float(opp_wheel_quat[2])
             opp_wheel_ts.transform.rotation.z = float(opp_wheel_quat[3])
