@@ -70,10 +70,12 @@ class GymBridge(Node):
                                     # "map": self.get_parameter('map_path').value,
                                     # "map_ext": self.get_parameter('map_img_ext').value,
                                     "control_input": ["accl", "steering_speed"],
-                                    "observation_config": {"type": "dynamic_state"},
+                                    "observation_config": {"type": "features",
+                                                           "features": ["scan", "pose_x", "pose_y", "pose_theta", "linear_vel_x", "linear_vel_y", "ang_vel_z", "delta", "beta", "collision", "lap_time", "lap_count"]},
                                     "num_agents": 2 if self.simulate_opponent else 1
                                     },)
         
+
         drive_topic: str = self.get_parameter('drive_topic').value
         state_topic: str = self.get_parameter('state_topic').value
 
@@ -161,6 +163,11 @@ class GymBridge(Node):
         self.ego_pose[0] = self.obs['agent_0']['pose_x']
         self.ego_pose[1] = self.obs['agent_0']['pose_y']
         self.ego_pose[2] = self.obs['agent_0']['pose_theta']
+        if (self.obs['agent_0']['collision']):
+            self.ego_drive_sub = None
+            self.ego_requested_acceleration = 0
+            self.ego_steer_speed = 0
+            self.get_logger().warn("Ego in collision")
 
         if self.simulate_opponent:
             self.opp_pose[0] = self.obs['agent_1']['pose_x']
