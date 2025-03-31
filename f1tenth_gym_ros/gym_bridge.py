@@ -107,7 +107,7 @@ class GymBridge(Node):
         # sim physical step timer
         self.drive_timer: rclpy.timer.Timer = self.create_timer(0.01, self.drive_timer_callback)
         # topic publishing timer
-        self.timer: rclpy.timer.Timer = self.create_timer(0.004, self.timer_callback)
+        self.timer: rclpy.timer.Timer = self.create_timer(0.01, self.timer_callback)
 
         # transform broadcaster
         self.br: TransformBroadcaster = TransformBroadcaster(self)
