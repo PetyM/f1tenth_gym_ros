@@ -25,11 +25,13 @@ import rclpy
 from rclpy.node import Node
 
 import rclpy.publisher
+import rclpy.service
 import rclpy.subscription
 import rclpy.timer
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist, TransformStamped, Transform, Quaternion, Pose, Point, Vector3
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
+from std_srvs.srv import Empty
 
 from tf2_ros import TransformBroadcaster
 from std_msgs.msg import Float64MultiArray, Float32 
@@ -88,6 +90,8 @@ class GymBridge(Node):
         self.ego_steer_speed: float = 0.0
         self.ego_collision: bool = False
         self.ego_drive_published: bool = False
+        self.ego_ready: bool = False
+        self.opp_ready: bool = not self.simulate_opponent
 
         if self.simulate_opponent:
             self.opp_namespace: str = self.get_parameter('opp_namespace').value
@@ -118,10 +122,12 @@ class GymBridge(Node):
         self.speed_publisher: rclpy.publisher.Publisher = self.create_publisher(Float32, f'{self.ego_namespace}/speed', 1)
         self.acceleration_publisher: rclpy.publisher.Publisher = self.create_publisher(Float32, f'{self.ego_namespace}/acceleration', 1)
         self.steering_publisher: rclpy.publisher.Publisher = self.create_publisher(Float32, f'{self.ego_namespace}/steer', 1)
+        self.ego_ready_service: rclpy.service.Service = self.create_service(Empty, f'{self.ego_namespace}/ready', self.ego_ready_callback)
 
         if self.simulate_opponent:
             self.opp_state_publisher: rclpy.publisher.Publisher = self.create_publisher(Float64MultiArray, f'{self.opp_namespace}/{state_topic}', 10)
             self.opp_drive_sub: rclpy.subscription.Subscription = self.create_subscription(AckermannDriveStamped, f'{self.opp_namespace}/{drive_topic}', self.opp_drive_callback, 10)
+            self.opp_ready_service: rclpy.service.Service = self.create_service(Empty, f'{self.opp_namespace}/ready', self.opp_ready_callback)
 
         self.wait_for_node('ego_agent', -1)
         if self.simulate_opponent:
@@ -142,7 +148,20 @@ class GymBridge(Node):
         self.get_logger().info(f'(opp_drive_callback) received opponent drive control: v={self.opp_requested_acceleration:.2f}, d={self.opp_steer_speed:.2f}')
 
 
+    def ego_ready_callback(self, request: Empty.Request, response: Empty.Response) -> Empty.Response:
+        self.ego_ready = True
+        return response
+
+
+    def opp_ready_callback(self, request: Empty.Request, response: Empty.Response) -> Empty.Response:
+        self.opp_ready = True
+        return response
+
+
     def drive_timer_callback(self):
+        if (not self.ego_ready) or (not self.opp_ready):
+            return
+
         if self.simulate_opponent:
             self.obs, _, self.done, _, _ = self.env.step(np.array([[self.ego_steer_speed, self.ego_requested_acceleration], [self.opp_steer_speed, self.opp_requested_acceleration]]))
         else:
