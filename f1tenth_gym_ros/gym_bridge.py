@@ -69,7 +69,7 @@ class GymBridge(Node):
         # env backend
         self.env: gym.Env = gym.make('f1tenth-v0',
                             config={
-                                    # "map": self.get_parameter('map_path').value,
+                                    "map": self.get_parameter('map_path').value,
                                     # "map_ext": self.get_parameter('map_img_ext').value,
                                     "control_input": ["accl", "steering_speed"],
                                     "observation_config": {"type": "features",
