@@ -27,9 +27,11 @@ from rclpy.node import Node
 import rclpy.publisher
 import rclpy.service
 import rclpy.subscription
+import rclpy.time
 import rclpy.timer
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist, TransformStamped, Transform, Quaternion, Pose, Point, Vector3
 from ackermann_msgs.msg import AckermannDriveStamped
+from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from std_srvs.srv import Empty
 
@@ -61,6 +63,9 @@ class GymBridge(Node):
         self.declare_parameter('map_path', 'f1tenth_gym_ros/maps/Spielberg_map')
         self.declare_parameter('map_img_ext', '.png')
         
+        self.declare_parameter('scan_distance_to_base_link', 0.0)
+        self.declare_parameter('scan_fov', 4.7)
+        self.declare_parameter('scan_beams', 1080)
 
         self.simulate_opponent: bool = self.get_parameter('simulate_opponent').value
 
@@ -92,6 +97,15 @@ class GymBridge(Node):
         self.ego_drive_published: bool = False
         self.ego_ready: bool = False
         self.opp_ready: bool = not self.simulate_opponent
+        self.lap_count: int = 0
+        self.lap_start_time: rclpy.time.Time = self.get_clock().now()
+
+
+        scan_fov = self.get_parameter('scan_fov').value
+        scan_beams = self.get_parameter('scan_beams').value
+        self.angle_min = -scan_fov / 2.
+        self.angle_max = scan_fov / 2.
+        self.angle_inc = scan_fov / scan_beams
 
         if self.simulate_opponent:
             self.opp_namespace: str = self.get_parameter('opp_namespace').value
@@ -123,11 +137,13 @@ class GymBridge(Node):
         self.acceleration_publisher: rclpy.publisher.Publisher = self.create_publisher(Float32, f'{self.ego_namespace}/acceleration', 1)
         self.steering_publisher: rclpy.publisher.Publisher = self.create_publisher(Float32, f'{self.ego_namespace}/steer', 1)
         self.ego_ready_service: rclpy.service.Service = self.create_service(Empty, f'{self.ego_namespace}/ready', self.ego_ready_callback)
+        self.ego_scan_publisher: rclpy.publisher.Publisher = self.create_publisher(LaserScan, f'{self.ego_namespace}/scan', 1)
 
         if self.simulate_opponent:
             self.opp_state_publisher: rclpy.publisher.Publisher = self.create_publisher(Float64MultiArray, f'{self.opp_namespace}/{state_topic}', 10)
             self.opp_drive_sub: rclpy.subscription.Subscription = self.create_subscription(AckermannDriveStamped, f'{self.opp_namespace}/{drive_topic}', self.opp_drive_callback, 10)
             self.opp_ready_service: rclpy.service.Service = self.create_service(Empty, f'{self.opp_namespace}/ready', self.opp_ready_callback)
+            self.opp_scan_publisher: rclpy.publisher.Publisher = self.create_publisher(LaserScan, f'{self.opp_namespace}/scan', 1)
 
         self.wait_for_node('ego_agent', -1)
         if self.simulate_opponent:
@@ -166,11 +182,43 @@ class GymBridge(Node):
             self.obs, _, self.done, _, _ = self.env.step(np.array([[self.ego_steer_speed, self.ego_requested_acceleration], [self.opp_steer_speed, self.opp_requested_acceleration]]))
         else:
             self.obs, _, self.done, _, _ = self.env.step(np.array([self.ego_steer_speed, self.ego_requested_acceleration]).reshape(1, 2))
+
         self._update_sim_state()
+
+        lap_count = int(self.obs['agent_0']['lap_count'])
+        if lap_count > self.lap_count:
+            self.lap_count = lap_count
+            time = self.get_clock().now()
+            lap_time = time - self.lap_start_time
+            self.get_logger().error(f'Lap {lap_count}: {int((s := lap_time.nanoseconds / 1e9) // 60)}:{int(s % 60):02}.{int((s - int(s)) * 1000):03}')
+            self.lap_start_time = time
 
 
     def timer_callback(self):
         ts = self.get_clock().now().to_msg()
+
+        scan = LaserScan()
+        scan.header.stamp = ts
+        scan.header.frame_id = self.ego_namespace + '/laser'
+        scan.angle_min = self.angle_min
+        scan.angle_max = self.angle_max
+        scan.angle_increment = self.angle_inc
+        scan.range_min = 0.
+        scan.range_max = 30.
+        scan.ranges = self.obs['agent_0']['scan']
+        self.ego_scan_publisher.publish(scan)
+
+        if self.simulate_opponent:
+            opp_scan = LaserScan()
+            opp_scan.header.stamp = ts
+            opp_scan.header.frame_id = self.opp_namespace + '/laser'
+            opp_scan.angle_min = self.angle_min
+            opp_scan.angle_max = self.angle_max
+            opp_scan.angle_increment = self.angle_inc
+            opp_scan.range_min = 0.
+            opp_scan.range_max = 30.
+            opp_scan.ranges = self.obs['agent_1']['scan']
+            self.opp_scan_publisher.publish(opp_scan)
         self._publish_transforms(ts)
         self._publish_wheel_transforms(ts)
         self._publish_states()
