@@ -35,8 +35,10 @@ from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from std_srvs.srv import Empty
 
+import cv2
 from tf2_ros import TransformBroadcaster
 from std_msgs.msg import Float64MultiArray, Float32 
+import math
 
 import f1tenth_gym
 import gymnasium as gym
@@ -106,6 +108,8 @@ class GymBridge(Node):
         self.angle_min = -scan_fov / 2.
         self.angle_max = scan_fov / 2.
         self.angle_inc = scan_fov / scan_beams
+        self.vehicle_width: float = 0.31
+        self.vehicle_length: float = 0.58
 
         if self.simulate_opponent:
             self.opp_namespace: str = self.get_parameter('opp_namespace').value
@@ -241,6 +245,10 @@ class GymBridge(Node):
             self.opp_pose[1] = self.obs['agent_1']['pose_y']
             self.opp_pose[2] = self.obs['agent_1']['pose_theta']
 
+            collision, _ = cv2.rotatedRectangleIntersection(((self.ego_pose[0], self.ego_pose[1]), (self.vehicle_width, self.vehicle_length), math.degrees(self.ego_pose[2])),
+                                                         ((self.opp_pose[0], self.opp_pose[1]), (self.vehicle_width, self.vehicle_length), math.degrees(self.opp_pose[2])))
+            if collision != 0:
+                self.get_logger().warn("Vehicle collision")
 
     def _publish_transforms(self, ts):
         ego_t = Transform()
