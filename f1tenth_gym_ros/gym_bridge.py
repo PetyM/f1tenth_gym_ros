@@ -69,6 +69,9 @@ class GymBridge(Node):
         self.declare_parameter('scan_fov', 4.7)
         self.declare_parameter('scan_beams', 1080)
 
+        self.declare_parameter('start_time_delta', 1.0)
+        self.declare_parameter('test_length', 5.0)
+
         self.simulate_opponent: bool = self.get_parameter('simulate_opponent').value
 
         self.get_logger().error(self.get_parameter('map_path').value)
@@ -87,6 +90,11 @@ class GymBridge(Node):
 
         drive_topic: str = self.get_parameter('drive_topic').value
         state_topic: str = self.get_parameter('state_topic').value
+
+        self.start_time: rclpy.time.Time = None
+
+        self.start_time_delta: float = self.get_parameter('start_time_delta').value
+        self.test_length: float = self.get_parameter('test_length').value
 
         self.ego_namespace: str = self.get_parameter('ego_namespace').value
         sx: float = self.get_parameter('sx').value
@@ -154,7 +162,7 @@ class GymBridge(Node):
             self.wait_for_node('opp_agent', -1)
 
 
-    def drive_callback(self, drive_msg: AckermannDriveStamped):
+    def drive_callback(self, drive_msg: AckermannDriveStamped): 
         self.ego_requested_acceleration = drive_msg.drive.acceleration
         self.ego_steer_speed = drive_msg.drive.steering_angle_velocity
         self.ego_drive_published = True
@@ -181,6 +189,14 @@ class GymBridge(Node):
     def drive_timer_callback(self):
         if (not self.ego_ready) or (not self.opp_ready):
             return
+        
+        if not self.start_time:
+            self.start_time = self.get_clock().now()
+
+        now = self.get_clock().now()
+        if (now - self.start_time).nanoseconds > (self.test_length * 60e9):
+            self.get_logger().warn('Time out')
+            self.drive_timer.cancel()
 
         if self.simulate_opponent:
             self.obs, _, self.done, _, _ = self.env.step(np.array([[self.ego_steer_speed, self.ego_requested_acceleration], [self.opp_steer_speed, self.opp_requested_acceleration]]))
