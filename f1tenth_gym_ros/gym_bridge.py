@@ -69,8 +69,9 @@ class GymBridge(Node):
         self.declare_parameter('scan_fov', 4.7)
         self.declare_parameter('scan_beams', 1080)
 
-        self.declare_parameter('start_time_delta', 1.0)
-        self.declare_parameter('test_length', 5.0)
+        self.declare_parameter('start_time_delta', 5.0)
+        self.declare_parameter('time_limit', 5.0)
+        self.declare_parameter('lap_limit', -1.0)
 
         self.simulate_opponent: bool = self.get_parameter('simulate_opponent').value
 
@@ -94,7 +95,8 @@ class GymBridge(Node):
         self.start_time: rclpy.time.Time = None
 
         self.start_time_delta: float = self.get_parameter('start_time_delta').value
-        self.test_length: float = self.get_parameter('test_length').value
+        self.time_limit: float = self.get_parameter('time_limit').value
+        self.lap_limit: float = self.get_parameter('lap_limit').value
 
         self.ego_namespace: str = self.get_parameter('ego_namespace').value
         sx: float = self.get_parameter('sx').value
@@ -128,6 +130,7 @@ class GymBridge(Node):
             self.opp_requested_acceleration: float = 0.0
             self.opp_steer_speed: float = 0.0
             self.opp_collision: bool = False
+            self.delayed_launch: bool = False
 
             self.obs, self.info = self.env.reset(options={'poses' : np.array([[sx, sy, stheta], [sx1, sy1, stheta1]])})
         else:
@@ -163,6 +166,9 @@ class GymBridge(Node):
 
 
     def drive_callback(self, drive_msg: AckermannDriveStamped): 
+        if self.simulate_opponent and (not self.delayed_launch) and ((not self.start_time) or (self.start_time and ((self.get_clock().now() - self.start_time).nanoseconds < (self.start_time_delta * 1e9)))):
+            return
+        self.delayed_launch = True
         self.ego_requested_acceleration = drive_msg.drive.acceleration
         self.ego_steer_speed = drive_msg.drive.steering_angle_velocity
         self.ego_drive_published = True
@@ -193,8 +199,7 @@ class GymBridge(Node):
         if not self.start_time:
             self.start_time = self.get_clock().now()
 
-        now = self.get_clock().now()
-        if (now - self.start_time).nanoseconds > (self.test_length * 60e9):
+        if (self.time_limit > 0) and ((self.get_clock().now() - self.start_time).nanoseconds > (self.time_limit * 60e9)):
             self.get_logger().warn('Time out')
             self.drive_timer.cancel()
 
@@ -210,8 +215,20 @@ class GymBridge(Node):
             self.lap_count = lap_count
             time = self.get_clock().now()
             lap_time = time - self.lap_start_time
-            self.get_logger().error(f'Lap {lap_count}: {int((s := lap_time.nanoseconds / 1e9) // 60)}:{int(s % 60):02}.{int((s - int(s)) * 1000):03}')
+            self.get_logger().warn(f'Lap {lap_count}: {int((s := lap_time.nanoseconds / 1e9) // 60)}:{int(s % 60):02}.{int((s - int(s)) * 1000):03}')
             self.lap_start_time = time
+
+
+        if self.simulate_opponent:
+            opp_lap_count = int(self.obs['agent_1']['lap_count'])
+            if lap_count > opp_lap_count:
+                self.get_logger().warn('Ego wins')
+                self.drive_timer.cancel()
+            if self.lap_limit > 0:
+                if min(lap_count, opp_lap_count) >= self.lap_limit:
+                    self.get_logger().warn('Laps out')
+                    self.drive_timer.cancel()
+
 
 
     def timer_callback(self):
@@ -261,10 +278,12 @@ class GymBridge(Node):
             self.opp_pose[1] = self.obs['agent_1']['pose_y']
             self.opp_pose[2] = self.obs['agent_1']['pose_theta']
 
-            collision, _ = cv2.rotatedRectangleIntersection(((self.ego_pose[0], self.ego_pose[1]), (self.vehicle_width, self.vehicle_length), math.degrees(self.ego_pose[2])),
-                                                         ((self.opp_pose[0], self.opp_pose[1]), (self.vehicle_width, self.vehicle_length), math.degrees(self.opp_pose[2])))
-            if collision != 0:
-                self.get_logger().warn("Vehicle collision")
+            if self.delayed_launch:
+                collision, _ = cv2.rotatedRectangleIntersection(((self.ego_pose[0], self.ego_pose[1]), (self.vehicle_width, self.vehicle_length), math.degrees(self.ego_pose[2])),
+                                                            ((self.opp_pose[0], self.opp_pose[1]), (self.vehicle_width, self.vehicle_length), math.degrees(self.opp_pose[2])))
+                if collision != 0:
+                    self.get_logger().warn("Vehicle collision")
+                    self.drive_timer.cancel()
 
     def _publish_transforms(self, ts):
         ego_t = Transform()
